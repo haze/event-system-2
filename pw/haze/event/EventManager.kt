@@ -42,12 +42,13 @@ class EventManager {
     companion object {
         private var inst: Optional<EventManager> = Optional.empty()
 
-        fun getInstance(): EventManager {
+        @JvmStatic fun getInstance(): EventManager {
             if (!inst.isPresent)
                 inst = Optional.of(EventManager())
             return inst.get()
         }
     }
+
 
     private var registeredEvents: MutableMap<KClass<out Event>, MutableSet<FunctionData>> = Hashtable<KClass<out Event>, MutableSet<FunctionData>>()
 
@@ -65,10 +66,9 @@ class EventManager {
         return null
     }
 
-    fun registerAll(inst: Any) {
-        val instClass = inst.javaClass.kotlin
+    fun getAllEventsInClass(clazz: KClass<*>): List<KClass<out Event>> {
         val events = arrayListOf<KClass<out Event>>()
-        val functions = instClass.getFunctionsWithAnnotation(EventMethod::class)
+        val functions = clazz.getFunctionsWithAnnotation(EventMethod::class)
         functions@ for (event: KFunction<*> in functions) {
             if (event.isAnnotationPresent(EventMethod::class)) {
                 annotations@ for (anno: Annotation in event.annotations) {
@@ -81,7 +81,44 @@ class EventManager {
                 }
             }
         }
-        register(inst, events)
+        return events
+    }
+
+
+    fun unregisterAll(inst: Any) {
+        unregister(inst, getAllEventsInClass(inst.javaClass.kotlin))
+    }
+
+    fun unregister(inst: Any, event: KClass<out Event>) {
+        unregister(inst, listOf(event))
+    }
+
+    fun unregister(inst: Any, events: List<KClass<out Event>>) {
+        val instClass = inst.javaClass.kotlin
+        events@ for (event: KClass<out Event> in events) {
+            var funcs: MutableSet<FunctionData> = this.registeredEvents.getOrElse(event, { linkedSetOf() })
+            val functions = instClass.getFunctionsWithAnnotation(EventMethod::class)
+
+            for (entry: MutableMap.MutableEntry<KClass<out Event>, MutableSet<FunctionData>> in this.registeredEvents) {
+                if (entry.equals(event)) {
+                    for (func: KFunction<*> in functions) {
+                        for (registeredFuncs: FunctionData in funcs) {
+                            if (registeredFuncs.function.equals(func)) {
+                                funcs.remove(registeredFuncs)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (this.registeredEvents.containsKey(event))
+                this.registeredEvents.remove(event)
+            this.registeredEvents.put(event, funcs)
+        }
+    }
+
+    fun registerAll(inst: Any) {
+        register(inst, getAllEventsInClass(inst.javaClass.kotlin))
     }
 
     fun register(inst: Any, events: List<KClass<out Event>>) {

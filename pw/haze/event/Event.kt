@@ -28,4 +28,6 @@ package pw.haze.event
  * |> Author: haze
  * |> Since: 3/28/16
  */
-open class Event {}
+open class Event {
+    var cancelled: Boolean = false
+}
