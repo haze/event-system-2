@@ -29,17 +29,18 @@ import pw.haze.event.annotation.EventPriority
 import pw.haze.event.annotation.Priority
 import pw.haze.event.util.FunctionData
 import java.util.*
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.reflect.KClass
 import kotlin.reflect.KFunction
-import kotlin.reflect.functions
+import kotlin.reflect.declaredFunctions
 
 /**
  * |> Author: haze
  * |> Since: 3/28/16
  */
 class EventManager {
-
     companion object {
+
         private var inst: Optional<EventManager> = Optional.empty()
 
         @JvmStatic fun getInstance(): EventManager {
@@ -50,10 +51,10 @@ class EventManager {
     }
 
 
-    private var registeredEvents: MutableMap<KClass<out Event>, MutableSet<FunctionData>> = Hashtable<KClass<out Event>, MutableSet<FunctionData>>()
+    private var registeredEvents: MutableMap<KClass<out Event>, CopyOnWriteArrayList<FunctionData>> = Hashtable<KClass<out Event>, CopyOnWriteArrayList<FunctionData>>()
 
     fun KClass<*>.getFunctionsWithAnnotation(anno: KClass<out Annotation>): List<KFunction<*>> =
-            this.functions.filter { func -> func.isAnnotationPresent(anno) }
+            this.declaredFunctions.filter { func -> func.isAnnotationPresent(anno) }
 
     fun KFunction<*>.isAnnotationPresent(anno: KClass<out Annotation>): Boolean = this.annotations.any { a -> a.annotationClass.equals(anno) }
 
@@ -96,11 +97,10 @@ class EventManager {
     fun unregister(inst: Any, events: List<KClass<out Event>>) {
         val instClass = inst.javaClass.kotlin
         events@ for (event: KClass<out Event> in events) {
-            var funcs: MutableSet<FunctionData> = this.registeredEvents.getOrElse(event, { linkedSetOf() })
+            var funcs: CopyOnWriteArrayList<FunctionData> = this.registeredEvents.getOrElse(event, { CopyOnWriteArrayList() })
             val functions = instClass.getFunctionsWithAnnotation(EventMethod::class)
-
-            for (entry: MutableMap.MutableEntry<KClass<out Event>, MutableSet<FunctionData>> in this.registeredEvents) {
-                if (entry.equals(event)) {
+            for (entry: MutableMap.MutableEntry<KClass<out Event>, CopyOnWriteArrayList<FunctionData>> in this.registeredEvents) {
+                if (entry.key.equals(event)) {
                     for (func: KFunction<*> in functions) {
                         for (registeredFuncs: FunctionData in funcs) {
                             if (registeredFuncs.function.equals(func)) {
@@ -124,7 +124,7 @@ class EventManager {
     fun register(inst: Any, events: List<KClass<out Event>>) {
         val instClass = inst.javaClass.kotlin
         events@ for (event: KClass<out Event> in events) {
-            var funcs = this.registeredEvents.getOrElse(event, { linkedSetOf() })
+            var funcs = this.registeredEvents.getOrElse(event, { CopyOnWriteArrayList() })
             val functions = instClass.getFunctionsWithAnnotation(EventMethod::class)
             functions@ for (func: KFunction<*> in functions) {
                 if (func.isAnnotationPresent(EventMethod::class)) {
@@ -137,7 +137,7 @@ class EventManager {
                         funcs.add(FunctionData(inst, priority, func, event))
                     }
                 }
-                funcs = funcs.toSortedSet(Comparator { f1, f2 -> f2.priority.ordinal - f1.priority.ordinal })
+                funcs.sort ({ f1, f2 -> f2.priority.ordinal - f1.priority.ordinal })
                 if (this.registeredEvents.containsKey(event))
                     this.registeredEvents.remove(event)
                 this.registeredEvents.put(event, funcs)
@@ -154,10 +154,18 @@ class EventManager {
         val eventClass = event.javaClass.kotlin
         if (this.registeredEvents.containsKey(eventClass) && this.registeredEvents[eventClass] != null) {
             functions@ for (func: FunctionData in this.registeredEvents[eventClass]!!) {
-                when (func.function.parameters.size) {
-                    1 -> func.function.call(func.inst)
-                    2 -> func.function.call(func.inst, event)
-                    else -> throw IllegalArgumentException("Too many arguments! Either use the argument in the function or don't use it at all!")
+                try {
+                    when (func.function.parameters.size) {
+                        1 -> func.function.call(func.inst)
+                        2 -> func.function.call(func.inst, event)
+                        else -> throw IllegalArgumentException("Too many arguments! Either use the argument in the function or don't use it at all!")
+                    }
+                } catch(err: InternalError) {
+                    err.printStackTrace()
+                    print("Caught SERIOUS exception! Cannot find method to call? Was it registered? Try restarting...")
+                } catch(err: IllegalArgumentException) {
+                    err.printStackTrace()
+                    print("Caught Illegal Argument Exception, check the method parameters and the event annotation-- make sure they match!")
                 }
             }
         }
